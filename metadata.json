@@ -1,0 +1,6 @@
+{
+  "name": "Atelier Artisanal Custom Goods",
+  "description": "Bespoke custom goods platform featuring phone cases, key rings, and personalized apparel with live order tracking, artisan messaging, and CMS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
