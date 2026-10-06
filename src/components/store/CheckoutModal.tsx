@@ -10,11 +10,19 @@ export const CheckoutModal: React.FC = () => {
     cart,
     placeOrder,
     user,
+    currentUser,
+    requireAuth,
     t,
     language,
   } = useApp();
 
   if (!isCheckoutOpen) return null;
+
+  if (!currentUser) {
+    setIsCheckoutOpen(false);
+    requireAuth('주문 결제는 회원 로그인 후 진행하실 수 있습니다.');
+    return null;
+  }
 
   const defaultAddr = user.savedAddresses[0] || {
     fullName: user.name,

@@ -33,6 +33,8 @@ export const MyProfilePage: React.FC = () => {
     setCurrentPage,
     logoutCustomer,
     updateUserProfile,
+    changeEmailPassword,
+    loginWithGoogle,
     resetTestData,
     orders,
     setSelectedOrderId,
@@ -84,11 +86,28 @@ export const MyProfilePage: React.FC = () => {
           </div>
 
           <div className="space-y-3 pt-2">
+            {/* Google 1-Click Login */}
+            <button
+              type="button"
+              onClick={async () => {
+                await loginWithGoogle();
+              }}
+              className="w-full py-3.5 px-4 bg-white hover:bg-stone-50 border-2 border-stone-800 rounded-xl text-xs font-black text-stone-900 flex items-center justify-center gap-2.5 transition-all shadow-[3px_3px_0px_0px_rgba(24,24,27,1)] hover:translate-y-0.5 hover:shadow-[1px_1px_0px_0px_rgba(24,24,27,1)] cursor-pointer"
+            >
+              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              </svg>
+              <span>Google 계정으로 1초 로그인</span>
+            </button>
+
             <button
               onClick={() => setCurrentPage('login')}
               className="w-full py-3.5 bg-stone-950 hover:bg-stone-800 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
             >
-              <span>KOJIN 로그인하러 가기</span>
+              <span>이메일로 로그인하러 가기</span>
               <ChevronRight className="w-4 h-4" />
             </button>
 
@@ -97,7 +116,7 @@ export const MyProfilePage: React.FC = () => {
               className="w-full py-3.5 bg-orange-600 hover:bg-orange-500 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md flex items-center justify-center gap-2"
             >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>1초 간편 회원가입</span>
+              <span>신규 회원가입</span>
             </button>
           </div>
 
@@ -162,21 +181,12 @@ export const MyProfilePage: React.FC = () => {
     showToast('프로필 정보가 성공적으로 수정되었습니다!', 'success');
   };
 
-  // Password Change Handler (Strictly for Email Accounts)
-  const handleChangePassword = (e: React.FormEvent) => {
+  // Password Change Handler (Strictly for Email Accounts with Firebase Auth)
+  const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError('');
     setPasswordSuccess('');
 
-    const expectedCurrentPassword = currentUser.password || 'password123';
-    if (!currentPasswordInput) {
-      setPasswordError('현재 비밀번호를 입력해주세요.');
-      return;
-    }
-    if (currentPasswordInput !== expectedCurrentPassword) {
-      setPasswordError('현재 비밀번호가 일치하지 않습니다.');
-      return;
-    }
     if (!newPasswordInput || newPasswordInput.length < 6) {
       setPasswordError('새 비밀번호는 최소 6자리 이상이어야 합니다.');
       return;
@@ -186,12 +196,15 @@ export const MyProfilePage: React.FC = () => {
       return;
     }
 
-    updateUserProfile({ password: newPasswordInput.trim() });
-    setCurrentPasswordInput('');
-    setNewPasswordInput('');
-    setConfirmPasswordInput('');
-    setPasswordSuccess('비밀번호가 성공적으로 변경되었습니다. 다음 로그인부터 새로운 비밀번호가 적용됩니다.');
-    showToast('비밀번호가 성공적으로 변경되었습니다!', 'success');
+    const res = await changeEmailPassword(newPasswordInput.trim());
+    if (res.success) {
+      setCurrentPasswordInput('');
+      setNewPasswordInput('');
+      setConfirmPasswordInput('');
+      setPasswordSuccess('비밀번호가 성공적으로 변경되었습니다. 다음 로그인부터 새로운 비밀번호가 적용됩니다.');
+    } else {
+      setPasswordError(res.error || '비밀번호 변경 중 오류가 발생했습니다.');
+    }
   };
 
   const wishlistedProducts = products.filter((p) => wishlist.includes(p.id));

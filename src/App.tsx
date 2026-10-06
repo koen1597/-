@@ -20,6 +20,7 @@ import { CustomerAuthPage } from './components/pages/CustomerAuthPage';
 import { MyProfilePage } from './components/pages/MyProfilePage';
 import { GoogleOAuthPage } from './components/pages/GoogleOAuthPage';
 import { AdminLoginModal } from './components/admin/AdminLoginModal';
+import { AuthRequiredModal } from './components/common/AuthRequiredModal';
 import { Sparkles, CheckCircle2, MessageSquare, Zap } from 'lucide-react';
 
 const StorefrontContent: React.FC = () => {
@@ -213,6 +214,9 @@ const AppContent: React.FC = () => {
 
       {/* Global Modals: Admin Authentication Gateway (5696) */}
       <AdminLoginModal />
+
+      {/* Access Control: Real Firebase Authentication Required Modal */}
+      <AuthRequiredModal />
     </>
   );
 };

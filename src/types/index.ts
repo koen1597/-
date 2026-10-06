@@ -212,6 +212,8 @@ export interface UserAccount {
   memberSince: string;
   birthDate?: string;
   authProvider: AuthProvider;
+  providerId?: string;
+  photoURL?: string;
   password?: string;
   savedAddresses: ShippingAddress[];
   role?: 'customer' | 'admin';

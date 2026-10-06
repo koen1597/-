@@ -12,6 +12,9 @@ export const ProductDetailModal: React.FC = () => {
     openChatWithArtisan,
     t,
     language,
+    currentUser,
+    requireAuth,
+    setIsCheckoutOpen,
   } = useApp();
 
   if (!selectedProduct) return null;
@@ -81,8 +84,29 @@ export const ProductDetailModal: React.FC = () => {
   };
 
   const handleAddToCart = () => {
+    if (!currentUser) {
+      requireAuth('장바구니 담기는 회원 로그인 후 이용하실 수 있습니다.', () => {
+        addToCart(selectedProduct, customization, quantity);
+        setSelectedProduct(null);
+      });
+      return;
+    }
     addToCart(selectedProduct, customization, quantity);
     setSelectedProduct(null);
+  };
+
+  const handleBuyNow = () => {
+    if (!currentUser) {
+      requireAuth('바로 구매 및 결제는 회원 로그인 후 이용하실 수 있습니다.', () => {
+        addToCart(selectedProduct, customization, quantity);
+        setSelectedProduct(null);
+        setIsCheckoutOpen(true);
+      });
+      return;
+    }
+    addToCart(selectedProduct, customization, quantity);
+    setSelectedProduct(null);
+    setIsCheckoutOpen(true);
   };
 
   const title = language === 'kr' && selectedProduct.titleKr ? selectedProduct.titleKr : selectedProduct.title;
@@ -488,11 +512,21 @@ export const ProductDetailModal: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleAddToCart}
-                  className="flex-1 py-3.5 px-6 bg-stone-950 text-white text-xs sm:text-sm font-bold rounded-xl hover:bg-stone-800 transition-colors shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 py-3 px-4 bg-stone-100 hover:bg-stone-200 border-2 border-stone-800 text-stone-900 text-xs sm:text-sm font-bold rounded-xl transition-colors shadow-xs flex items-center justify-center gap-2 cursor-pointer"
                 >
-                  <ShoppingBag className="w-4 h-4 text-amber-400" />
+                  <ShoppingBag className="w-4 h-4 text-orange-600" />
+                  <span>{t('addToBag')}</span>
+                </button>
+
+                {/* Buy Now Button */}
+                <button
+                  type="button"
+                  onClick={handleBuyNow}
+                  className="flex-1 py-3 px-4 bg-stone-950 text-white text-xs sm:text-sm font-bold rounded-xl hover:bg-stone-800 transition-colors shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-400" />
                   <span>
-                    {t('addToBag')} — {(selectedProduct.price * quantity).toLocaleString()} 원
+                    바로 구매 — {(selectedProduct.price * quantity).toLocaleString()}원
                   </span>
                 </button>
               </div>

@@ -25,6 +25,18 @@ import {
 } from '../data/initialData';
 import { AuthProvider } from '../types';
 import { Language, TRANSLATIONS } from '../data/translations';
+import {
+  auth,
+  googleProvider,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as firebaseSignOut,
+  onAuthStateChanged,
+  updateProfile as firebaseUpdateProfile,
+  updatePassword as firebaseUpdatePassword,
+  getFirebaseAuthErrorMessage,
+} from '../firebase';
 
 export type StorePage = 'home' | 'shop' | 'templates' | 'welcome-kit' | 'bulk-order' | 'login' | 'signup' | 'account' | 'profile' | 'google_oauth';
 
@@ -110,8 +122,9 @@ interface AppContextType {
   updateUser: (updates: Partial<UserAccount>) => void;
   users: UserAccount[];
   currentUser: UserAccount | null;
-  loginWithEmail: (email: string, password?: string) => boolean;
-  loginWithGoogle: (email: string, name: string, avatar?: string) => boolean;
+  isAuthLoading: boolean;
+  loginWithEmail: (email: string, password?: string) => Promise<boolean>;
+  loginWithGoogle: (emailParam?: string, nameParam?: string, avatarParam?: string) => Promise<boolean>;
   resetTestData: () => void;
   registerUser: (params: {
     name: string;
@@ -119,10 +132,17 @@ interface AppContextType {
     password?: string;
     birthDate?: string;
     phone?: string;
-    authProvider: AuthProvider;
-  }) => boolean;
-  updateUserProfile: (updates: Partial<UserAccount>) => void;
-  logoutCustomer: () => void;
+    authProvider?: AuthProvider;
+  }) => Promise<boolean>;
+  updateUserProfile: (updates: Partial<UserAccount>) => Promise<void>;
+  changeEmailPassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  logoutCustomer: () => Promise<void>;
+
+  // Access Control & Purchase Flow Restriction Guards
+  isAuthModalOpen: boolean;
+  setIsAuthModalOpen: (open: boolean) => void;
+  authModalReason: string;
+  requireAuth: (reason: string, onAuthorized?: () => void) => boolean;
 
   appMode: 'store' | 'admin';
   setAppMode: (mode: 'store' | 'admin') => void;
@@ -314,186 +334,235 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [isChatDrawerOpen, setIsChatDrawerOpen] = useState<boolean>(false);
 
-  // Customer User Directory & Authentication
+  // Customer User Directory & Real Firebase Authentication
+  const [currentUser, setCurrentUser] = useState<UserAccount | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [user, setUser] = useState<UserAccount>(INITIAL_USER);
   const [users, setUsers] = useState<UserAccount[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.USERS);
-    if (!saved) return INITIAL_USERS;
     try {
-      const parsed: UserAccount[] = JSON.parse(saved);
-      const DUMMY_IDS = new Set([
-        'usr-dohyun-park',
-        'usr-minji-kim',
-        'usr-subin-choi',
-        'usr-koen-nakano',
-        'usr-archive-demo',
-      ]);
-      return parsed.filter(
-        (u) =>
-          !DUMMY_IDS.has(u.id) &&
-          u.email !== 'dohyun.park@gmail.com' &&
-          u.email !== 'creator.studio@gmail.com' &&
-          u.phone !== '010-8924-1102'
-      );
+      const saved = localStorage.getItem('kojin_customer_directory_v1');
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return INITIAL_USERS;
+      return [];
     }
   });
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-  }, [users]);
+  // Access Control & Protected Flow Modal
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalReason, setAuthModalReason] = useState<string>('장바구니 담기 및 결제는 회원 로그인 후 이용 가능합니다.');
+  const [pendingAuthorizedCallback, setPendingAuthorizedCallback] = useState<(() => void) | null>(null);
 
-  const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
-    const saved = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (!saved || saved === 'null' || saved === 'undefined') return null;
-    try {
-      const parsed = JSON.parse(saved);
-      // If the cached user is the old mock Koen with 010-8924-1102 phone, reset to null
-      if (parsed.phone === '010-8924-1102' || parsed.id === 'usr-koen-nakano') {
-        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-        return null;
-      }
-      return parsed;
-    } catch {
-      return null;
-    }
-  });
-
-  useEffect(() => {
+  const requireAuth = (reason: string, onAuthorized?: () => void): boolean => {
     if (currentUser) {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    }
-  }, [currentUser]);
-
-  // Backward compatibility user state
-  const [user, setUser] = useState<UserAccount>(() => currentUser || INITIAL_USER);
-
-  useEffect(() => {
-    if (currentUser) {
-      setUser(currentUser);
-    }
-  }, [currentUser]);
-
-  const loginWithEmail = (email: string, password?: string): boolean => {
-    const cleanEmail = email.trim().toLowerCase();
-    const found = users.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (!found) {
-      showToast('등록되지 않은 이메일 계정입니다. 회원가입을 먼저 진행해주세요.', 'alert');
-      return false;
-    }
-    if (found.password) {
-      if (!password || found.password !== password) {
-        showToast('비밀번호가 일치하지 않습니다. 다시 확인해주세요.', 'alert');
-        return false;
-      }
-    }
-    setCurrentUser(found);
-    setUser(found);
-    showToast(`${found.name}님, 환영합니다! 로그인되었습니다.`, 'success');
-    return true;
-  };
-
-  const loginWithGoogle = (emailParam: string, nameParam: string, avatarParam?: string): boolean => {
-    const cleanEmail = emailParam.trim().toLowerCase();
-    const cleanName = nameParam.trim();
-    if (!cleanEmail) {
-      showToast('Google 이메일 주소를 입력해주세요.', 'alert');
-      return false;
-    }
-
-    const existing = users.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (existing) {
-      setCurrentUser(existing);
-      setUser(existing);
-      showToast(`${existing.name}님, Google 계정으로 로그인되었습니다!`, 'success');
+      if (onAuthorized) onAuthorized();
       return true;
     }
-
-    // Brand-new Google user: 100% clean account with 0 orders, 0 spend!
-    const newGoogleUser: UserAccount = {
-      id: `usr-google-${Date.now()}`,
-      name: cleanName || cleanEmail.split('@')[0],
-      email: cleanEmail,
-      phone: '',
-      avatar:
-        avatarParam ||
-        'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
-      memberSince: '2026년 10월',
-      birthDate: '',
-      authProvider: 'google',
-      role: 'customer',
-      savedAddresses: [],
-    };
-
-    setUsers((prev) => [newGoogleUser, ...prev]);
-    setCurrentUser(newGoogleUser);
-    setUser(newGoogleUser);
-    showToast(`🎉 ${newGoogleUser.name}님, Google 계정으로 회원가입 및 로그인이 완료되었습니다!`, 'success');
-    return true;
+    setAuthModalReason(reason);
+    if (onAuthorized) {
+      setPendingAuthorizedCallback(() => onAuthorized);
+    }
+    setIsAuthModalOpen(true);
+    return false;
   };
 
-  const resetTestData = () => {
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    localStorage.removeItem(STORAGE_KEYS.USERS);
-    localStorage.removeItem(STORAGE_KEYS.ORDERS);
-    setCurrentUser(null);
-    setUsers(INITIAL_USERS);
-    setOrders(INITIAL_ORDERS);
-    showToast('테스트 데이터가 초기화되었습니다. 깨끗한 상태로 다시 시작합니다.', 'info');
+  // Sync with Firebase Authentication onAuthStateChanged
+  useEffect(() => {
+    // Remove obsolete mock storage
+    localStorage.removeItem('kojin_users_v2');
+    localStorage.removeItem('atelier_users_v2');
+
+    const unsubscribe = onAuthStateChanged(auth, (fbUser) => {
+      if (fbUser) {
+        const isGoogle = fbUser.providerData.some((p) => p.providerId === 'google.com');
+        const providerId = fbUser.providerData[0]?.providerId || (isGoogle ? 'google.com' : 'password');
+
+        let localProfile: any = {};
+        try {
+          const saved = localStorage.getItem(`kojin_profile_${fbUser.uid}`);
+          if (saved) localProfile = JSON.parse(saved);
+        } catch {}
+
+        const userAccount: UserAccount = {
+          id: fbUser.uid,
+          name: localProfile.name || fbUser.displayName || fbUser.email?.split('@')[0] || 'KOJIN 고객님',
+          email: fbUser.email || '',
+          phone: localProfile.phone || fbUser.phoneNumber || '',
+          avatar:
+            fbUser.photoURL ||
+            localProfile.avatar ||
+            'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80',
+          photoURL: fbUser.photoURL || undefined,
+          memberSince: fbUser.metadata.creationTime
+            ? new Date(fbUser.metadata.creationTime).toLocaleDateString('ko-KR', {
+                year: 'numeric',
+                month: 'long',
+              })
+            : '2026년 10월',
+          birthDate: localProfile.birthDate || '미등록',
+          authProvider: isGoogle ? 'google' : 'email',
+          providerId: providerId,
+          role: 'customer',
+          savedAddresses: localProfile.savedAddresses || [],
+        };
+
+        setCurrentUser(userAccount);
+        setUser(userAccount);
+
+        // Keep directory updated for Admin CMS
+        setUsers((prev) => {
+          const idx = prev.findIndex((u) => u.id === userAccount.id);
+          const next = idx >= 0 ? prev.map((u, i) => (i === idx ? userAccount : u)) : [userAccount, ...prev];
+          localStorage.setItem('kojin_customer_directory_v1', JSON.stringify(next));
+          return next;
+        });
+      } else {
+        setCurrentUser(null);
+        setUser(INITIAL_USER);
+      }
+      setIsAuthLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  const executePendingPostLogin = () => {
+    if (pendingAuthorizedCallback) {
+      const cb = pendingAuthorizedCallback;
+      setPendingAuthorizedCallback(null);
+      setTimeout(() => cb(), 150);
+    }
   };
 
-  const registerUser = (params: {
+  const loginWithGoogle = async (
+    _emailParam?: string,
+    _nameParam?: string,
+    _avatarParam?: string
+  ): Promise<boolean> => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const name = result.user.displayName || result.user.email?.split('@')[0] || '고객';
+      showToast(`🎉 ${name}님, Google 계정으로 로그인되었습니다!`, 'success');
+      setIsAuthModalOpen(false);
+      executePendingPostLogin();
+      return true;
+    } catch (err: any) {
+      if (err?.code === 'auth/popup-closed-by-user') {
+        showToast('Google 로그인 창이 닫혔습니다.', 'info');
+        return false;
+      }
+      const msg = getFirebaseAuthErrorMessage(err?.code || '');
+      showToast(msg, 'alert');
+      return false;
+    }
+  };
+
+  const loginWithEmail = async (email: string, password?: string): Promise<boolean> => {
+    if (!password) {
+      showToast('비밀번호를 입력해주세요.', 'alert');
+      return false;
+    }
+    try {
+      const result = await signInWithEmailAndPassword(auth, email.trim(), password);
+      const name = result.user.displayName || result.user.email?.split('@')[0] || '고객';
+      showToast(`${name}님, 환영합니다! 로그인되었습니다.`, 'success');
+      setIsAuthModalOpen(false);
+      executePendingPostLogin();
+      return true;
+    } catch (err: any) {
+      const msg = getFirebaseAuthErrorMessage(err?.code || '');
+      showToast(msg, 'alert');
+      return false;
+    }
+  };
+
+  const registerUser = async (params: {
     name: string;
     email: string;
     password?: string;
     birthDate?: string;
     phone?: string;
-    authProvider: AuthProvider;
-  }): boolean => {
-    const cleanEmail = params.email.trim().toLowerCase();
-    const exists = users.some((u) => u.email.toLowerCase() === cleanEmail);
-    if (exists) {
-      showToast('이미 등록된 이메일 계정입니다. 해당 계정으로 로그인해주세요.', 'alert');
+    authProvider?: AuthProvider;
+  }): Promise<boolean> => {
+    if (!params.password) {
+      showToast('비밀번호를 입력해주세요.', 'alert');
       return false;
     }
+    try {
+      const result = await createUserWithEmailAndPassword(auth, params.email.trim(), params.password);
+      if (params.name.trim() && result.user) {
+        await firebaseUpdateProfile(result.user, { displayName: params.name.trim() });
+      }
 
-    const newUser: UserAccount = {
-      id: `usr-${Date.now()}`,
-      name: params.name.trim(),
-      email: cleanEmail,
-      phone: params.phone ? params.phone.trim() : '',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=200&q=80',
-      memberSince: '2026년 10월',
-      birthDate: params.birthDate && params.birthDate.trim() ? params.birthDate.trim() : '미등록',
-      authProvider: params.authProvider,
-      password: params.password,
-      role: 'customer',
-      savedAddresses: [],
-    };
+      // Persist additional metadata
+      const profileData = {
+        name: params.name.trim(),
+        phone: params.phone?.trim() || '',
+        birthDate: params.birthDate?.trim() || '미등록',
+        savedAddresses: [],
+      };
+      localStorage.setItem(`kojin_profile_${result.user.uid}`, JSON.stringify(profileData));
 
-    setUsers((prev) => [newUser, ...prev]);
-    setCurrentUser(newUser);
-    setUser(newUser);
-    showToast(`🎉 ${newUser.name}님, KOJIN 회원가입 및 로그인이 완료되었습니다!`, 'success');
-    return true;
+      showToast(`🎉 ${params.name.trim()}님, KOJIN 회원가입 및 로그인이 완료되었습니다!`, 'success');
+      setIsAuthModalOpen(false);
+      executePendingPostLogin();
+      return true;
+    } catch (err: any) {
+      const msg = getFirebaseAuthErrorMessage(err?.code || '');
+      showToast(msg, 'alert');
+      return false;
+    }
   };
 
-  const updateUserProfile = (updates: Partial<UserAccount>) => {
+  const updateUserProfile = async (updates: Partial<UserAccount>) => {
     if (!currentUser) return;
     const updated = { ...currentUser, ...updates };
     setCurrentUser(updated);
     setUser(updated);
+
+    if (auth.currentUser && updates.name) {
+      try {
+        await firebaseUpdateProfile(auth.currentUser, { displayName: updates.name });
+      } catch (e) {
+        console.warn('Profile name update in auth:', e);
+      }
+    }
+
+    localStorage.setItem(`kojin_profile_${updated.id}`, JSON.stringify(updated));
     setUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
     showToast('회원 정보가 성공적으로 수정되었습니다.', 'success');
   };
 
-  const logoutCustomer = () => {
-    setCurrentUser(null);
-    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-    setCurrentPage('home');
-    showToast('로그아웃 되었습니다.', 'info');
+  const changeEmailPassword = async (
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!auth.currentUser) return { success: false, error: '로그인이 필요합니다.' };
+    try {
+      await firebaseUpdatePassword(auth.currentUser, newPassword);
+      showToast('비밀번호가 성공적으로 변경되었습니다.', 'success');
+      return { success: true };
+    } catch (err: any) {
+      const msg = getFirebaseAuthErrorMessage(err?.code || '');
+      showToast(msg, 'alert');
+      return { success: false, error: msg };
+    }
+  };
+
+  const logoutCustomer = async () => {
+    try {
+      await firebaseSignOut(auth);
+      setCurrentUser(null);
+      setUser(INITIAL_USER);
+      setCurrentPage('home');
+      showToast('로그아웃 되었습니다.', 'info');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  const resetTestData = () => {
+    localStorage.removeItem(STORAGE_KEYS.ORDERS);
+    setOrders(INITIAL_ORDERS);
+    showToast('주문 테스트 데이터가 초기화되었습니다.', 'info');
   };
 
   // Admin Security & Password Management (Initial password: 5696)
@@ -689,7 +758,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Cart operations
-  const addToCart = (product: Product, customization: CustomSelection, quantity = 1) => {
+  const performAddToCart = (product: Product, customization: CustomSelection, quantity = 1) => {
     const itemId = `ci-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const newItem: CartItem = {
       id: itemId,
@@ -702,7 +771,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setCart((prev) => [...prev, newItem]);
     setIsCartOpen(true);
-    showToast(`Added "${product.title}" with custom specifications to your bag`, 'success');
+    showToast(language === 'kr' ? `'${product.titleKr || product.title}' 상품이 장바구니에 담겼습니다!` : `Added "${product.title}" to your bag`, 'success');
+  };
+
+  const addToCart = (product: Product, customization: CustomSelection, quantity = 1) => {
+    if (!currentUser) {
+      requireAuth('장바구니 담기 및 주문 제작은 회원 로그인 후 이용하실 수 있습니다.', () => {
+        performAddToCart(product, customization, quantity);
+      });
+      return;
+    }
+    performAddToCart(product, customization, quantity);
+  };
+
+  const setIsCartOpenGuarded = (open: boolean) => {
+    if (open && !currentUser) {
+      requireAuth('장바구니 조회를 위해 먼저 로그인해주세요.', () => {
+        setIsCartOpen(true);
+      });
+      return;
+    }
+    setIsCartOpen(open);
+  };
+
+  const setIsCheckoutOpenGuarded = (open: boolean) => {
+    if (open && !currentUser) {
+      requireAuth('주문 결제를 진행하시려면 먼저 로그인해주세요.', () => {
+        setIsCheckoutOpen(true);
+      });
+      return;
+    }
+    setIsCheckoutOpen(open);
   };
 
   const removeFromCart = (cartItemId: string) => {
@@ -1179,9 +1278,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateCartQuantity,
         clearCart,
         isCartOpen,
-        setIsCartOpen,
+        setIsCartOpen: setIsCartOpenGuarded,
         isCheckoutOpen,
-        setIsCheckoutOpen,
+        setIsCheckoutOpen: setIsCheckoutOpenGuarded,
         orders,
         selectedOrderId,
         setSelectedOrderId,
@@ -1217,12 +1316,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateUser,
         users,
         currentUser,
+        isAuthLoading,
         loginWithEmail,
         loginWithGoogle,
         resetTestData,
         registerUser,
         updateUserProfile,
+        changeEmailPassword,
         logoutCustomer,
+        isAuthModalOpen,
+        setIsAuthModalOpen,
+        authModalReason,
+        requireAuth,
         appMode,
         setAppMode,
         adminView,

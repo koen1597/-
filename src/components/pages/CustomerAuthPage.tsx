@@ -22,6 +22,7 @@ export const CustomerAuthPage: React.FC = () => {
     currentPage,
     setCurrentPage,
     loginWithEmail,
+    loginWithGoogle,
     registerUser,
     language,
     currentUser,
@@ -55,6 +56,7 @@ export const CustomerAuthPage: React.FC = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
 
   // If user is already logged in and lands here, provide an easy redirect to profile
   if (currentUser) {
@@ -93,7 +95,7 @@ export const CustomerAuthPage: React.FC = () => {
   }
 
   // Handle Login submission
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -107,19 +109,16 @@ export const CustomerAuthPage: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    const success = loginWithEmail(email, password);
+    const success = await loginWithEmail(email, password);
     setIsSubmitting(false);
 
     if (success) {
-      // Directly navigate to My Profile page so user sees they are logged in!
       setCurrentPage('profile');
-    } else {
-      setErrorMsg('등록되지 않은 이메일이거나 비밀번호가 일치하지 않습니다.');
     }
   };
 
   // Handle Registration submission
-  const handleRegisterSubmit = (e: React.FormEvent) => {
+  const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -145,7 +144,7 @@ export const CustomerAuthPage: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    const success = registerUser({
+    const success = await registerUser({
       name: name.trim(),
       email: email.trim(),
       password,
@@ -156,16 +155,22 @@ export const CustomerAuthPage: React.FC = () => {
     setIsSubmitting(false);
 
     if (success) {
-      // Once registered, user is logged in automatically and redirected to their new profile page!
       setCurrentPage('profile');
-    } else {
-      setErrorMsg('이미 가입된 이메일 계정입니다. 로그인 탭으로 이동해주세요.');
     }
   };
 
-  // Handle Google Social Login - Navigates to full-screen Google OAuth page
-  const handleGoogleLogin = () => {
-    setCurrentPage('google_oauth');
+  // Handle Google Social Login - Triggers real Firebase OAuth popup
+  const handleGoogleLogin = async () => {
+    setIsGoogleLoading(true);
+    setErrorMsg('');
+    try {
+      const success = await loginWithGoogle();
+      if (success) {
+        setCurrentPage('profile');
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
   };
 
   return (
@@ -246,32 +251,42 @@ export const CustomerAuthPage: React.FC = () => {
             <div className="space-y-2">
               <button
                 type="button"
+                disabled={isGoogleLoading || isSubmitting}
                 onClick={handleGoogleLogin}
-                className="w-full py-3.5 px-4 bg-white hover:bg-stone-50 border-2 border-stone-300 hover:border-stone-900 rounded-2xl text-xs font-black text-stone-800 flex items-center justify-center gap-3 transition-all shadow-xs cursor-pointer group"
+                className="w-full py-3.5 px-4 bg-white hover:bg-stone-50 border-2 border-stone-800 rounded-2xl text-xs font-black text-stone-900 flex items-center justify-center gap-3 transition-all shadow-[3px_3px_0px_0px_rgba(24,24,27,1)] hover:translate-y-0.5 hover:shadow-[1px_1px_0px_0px_rgba(24,24,27,1)] cursor-pointer disabled:opacity-60 group"
               >
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path
-                    fill="#4285F4"
-                    d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-                  />
-                  <path
-                    fill="#EA4335"
-                    d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-                  />
-                </svg>
-                <span>
-                  {mode === 'login'
-                    ? 'Google 계정으로 계속하기'
-                    : 'Google 계정으로 1초 간편 회원가입'}
-                </span>
+                {isGoogleLoading ? (
+                  <div className="flex items-center gap-2">
+                    <span className="w-4 h-4 border-2 border-stone-400 border-t-stone-900 rounded-full animate-spin" />
+                    <span>Google 로그인 진행 중...</span>
+                  </div>
+                ) : (
+                  <>
+                    <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
+                      <path
+                        fill="#4285F4"
+                        d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                      />
+                      <path
+                        fill="#34A853"
+                        d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                      />
+                      <path
+                        fill="#FBBC05"
+                        d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                      />
+                      <path
+                        fill="#EA4335"
+                        d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                      />
+                    </svg>
+                    <span>
+                      {mode === 'login'
+                        ? 'Google 계정으로 계속하기'
+                        : 'Google 계정으로 1초 간편 회원가입'}
+                    </span>
+                  </>
+                )}
               </button>
 
               <div className="relative flex items-center justify-center my-4">

@@ -13,6 +13,8 @@ export const CartDrawer: React.FC = () => {
     setIsCheckoutOpen,
     t,
     language,
+    currentUser,
+    requireAuth,
   } = useApp();
 
   if (!isCartOpen) return null;
@@ -20,6 +22,13 @@ export const CartDrawer: React.FC = () => {
   const subtotal = cart.reduce((acc, item) => acc + item.totalPrice, 0);
 
   const handleCheckoutClick = () => {
+    if (!currentUser) {
+      setIsCartOpen(false);
+      requireAuth('주문 결제를 진행하시려면 먼저 로그인해주세요.', () => {
+        setIsCheckoutOpen(true);
+      });
+      return;
+    }
     setIsCartOpen(false);
     setIsCheckoutOpen(true);
   };
